@@ -47,7 +47,7 @@ conn = conn_db()
 c = conn.cursor()
 
 # =========================
-# AUTO DELETE
+# AUTO DELETE 15 HARI
 # =========================
 try:
     c.execute("""
@@ -80,7 +80,7 @@ CREATE TABLE IF NOT EXISTS operan (
 conn.commit()
 
 # =========================
-# SHIFT
+# SHIFT AUTO
 # =========================
 jam = datetime.now(jakarta).hour
 
@@ -104,7 +104,94 @@ st.sidebar.title("🏥 Pilih Unit")
 selected_unit = st.sidebar.selectbox("Unit", unit_list)
 
 # =========================
-# DATA
+# SEARCH
+# =========================
+st.subheader("🔎 Cari Pasien")
+
+search = st.text_input("Cari No RM / Nama")
+
+if len(search) >= 3:
+
+    df_search = pd.read_sql_query("""
+        SELECT *
+        FROM operan
+        WHERE no_rm LIKE ?
+        OR nama_pasien LIKE ?
+        ORDER BY id DESC
+        LIMIT 50
+    """, conn, params=(f"%{search}%", f"%{search}%"))
+
+    st.dataframe(df_search, use_container_width=True, height=300)
+
+st.divider()
+
+# =========================
+# INPUT
+# =========================
+st.subheader(f"📝 Input Operan - {selected_unit}")
+
+with st.form("form"):
+
+    col1, col2 = st.columns(2)
+
+    with col1:
+        tanggal = datetime.now(jakarta).strftime("%Y-%m-%d %H:%M:%S")
+
+        st.text_input("Tanggal", value=tanggal, disabled=True)
+        st.text_input("Shift", value=auto_shift, disabled=True)
+
+        shift = auto_shift
+
+        no_rm = st.text_input("No RM")
+        nama_pasien = st.text_input("Nama Pasien")
+
+    with col2:
+        kamar = st.text_input("Kamar")
+        diagnosa = st.text_input("Diagnosa")
+        pj_operan = st.text_input("PJ Operan")
+
+    operan = st.text_area("Operan", height=130, max_chars=1500)
+
+    submit = st.form_submit_button("Simpan")
+
+# =========================
+# SAVE
+# =========================
+if submit:
+
+    if no_rm and nama_pasien:
+
+        c.execute("""
+            INSERT INTO operan (
+                tanggal, unit, shift,
+                no_rm, nama_pasien,
+                kamar, diagnosa,
+                operan, pj_operan
+            )
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+        """, (
+            tanggal, selected_unit, shift,
+            no_rm, nama_pasien,
+            kamar, diagnosa,
+            operan, pj_operan
+        ))
+
+        conn.commit()
+
+        st.success("Tersimpan")
+        st.rerun()
+
+# =========================
+# STATE
+# =========================
+if "open_detail" not in st.session_state:
+    st.session_state["open_detail"] = None
+
+if "confirm_delete" not in st.session_state:
+    st.session_state["confirm_delete"] = None
+
+# =========================
+# DATA LIST
 # =========================
 st.subheader("📋 Data Operan")
 
@@ -116,74 +203,58 @@ ORDER BY id DESC
 LIMIT 100
 """, conn, params=(selected_unit,))
 
-if "open_detail" not in st.session_state:
-    st.session_state["open_detail"] = None
-
-if "confirm_delete" not in st.session_state:
-    st.session_state["confirm_delete"] = None
-
-# =========================
-# LOOP DATA
-# =========================
 for _, r in df.iterrows():
 
-    with st.container():
-        st.markdown("---")
+    st.markdown("---")
 
-        col1, col2, col3, col4 = st.columns(4)
+    col1, col2, col3, col4 = st.columns(4)
 
-        col1.write(f"📅 {r['tanggal']}")
-        col2.write(f"⏱ {r['shift']}")
-        col3.write(f"🆔 {r['no_rm']}")
-        col4.write(f"👤 {r['nama_pasien']}")
+    col1.write(f"📅 {r['tanggal']}")
+    col2.write(f"⏱ {r['shift']}")
+    col3.write(f"🆔 {r['no_rm']}")
+    col4.write(f"👤 {r['nama_pasien']}")
 
-        st.write(f"🏠 {r['kamar']} | 🧾 {r['diagnosa']} | 👨‍⚕️ {r['pj_operan']}")
+    st.write(f"🏠 {r['kamar']} | 🧾 {r['diagnosa']} | 👨‍⚕️ {r['pj_operan']}")
 
-        colA, colB = st.columns([1, 1])
+    colA, colB = st.columns([1, 1])
 
-        # =========================
-        # DETAIL BUTTON
-        # =========================
-        if colA.button("📄 Detail", key=f"detail_{r['id']}"):
-            if st.session_state["open_detail"] == r["id"]:
-                st.session_state["open_detail"] = None
-            else:
-                st.session_state["open_detail"] = r["id"]
+    # DETAIL
+    if colA.button("📄 Detail", key=f"detail_{r['id']}"):
 
-        # =========================
-        # DELETE BUTTON (STEP 1)
-        # =========================
-        if colB.button("🗑 Hapus", key=f"del_{r['id']}"):
-            st.session_state["confirm_delete"] = r["id"]
-
-        # =========================
-        # CONFIRM DELETE (STEP 2)
-        # =========================
-        if st.session_state["confirm_delete"] == r["id"]:
-
-            st.warning(f"⚠️ Yakin ingin menghapus: {r['nama_pasien']} ?")
-
-            col_yes, col_no = st.columns(2)
-
-            with col_yes:
-                if st.button("✅ Ya, Hapus", key=f"yes_{r['id']}"):
-                    c.execute("DELETE FROM operan WHERE id=?", (r["id"],))
-                    conn.commit()
-
-                    st.session_state["confirm_delete"] = None
-                    st.rerun()
-
-            with col_no:
-                if st.button("❌ Batal", key=f"no_{r['id']}"):
-                    st.session_state["confirm_delete"] = None
-                    st.rerun()
-
-        # =========================
-        # DETAIL CONTENT
-        # =========================
         if st.session_state["open_detail"] == r["id"]:
-            st.info(r["operan"])
-            st.caption(f"✏️ Edit: {r['edited_by']} | {r['edited_at']}")
+            st.session_state["open_detail"] = None
+        else:
+            st.session_state["open_detail"] = r["id"]
+
+    # DELETE BUTTON
+    if colB.button("🗑 Hapus", key=f"del_{r['id']}"):
+        st.session_state["confirm_delete"] = r["id"]
+
+    # CONFIRM DELETE
+    if st.session_state["confirm_delete"] == r["id"]:
+
+        st.warning(f"⚠️ Yakin ingin menghapus pasien: {r['nama_pasien']} ?")
+
+        col_yes, col_no = st.columns(2)
+
+        with col_yes:
+            if st.button("✅ Ya, Hapus", key=f"yes_{r['id']}"):
+
+                c.execute("DELETE FROM operan WHERE id=?", (r["id"],))
+                conn.commit()
+
+                st.session_state["confirm_delete"] = None
+                st.rerun()
+
+        with col_no:
+            if st.button("❌ Batal", key=f"no_{r['id']}"):
+                st.session_state["confirm_delete"] = None
+                st.rerun()
+
+    # DETAIL SHOW
+    if st.session_state["open_detail"] == r["id"]:
+        st.info(r["operan"])
+        st.caption(f"✏️ Edit: {r['edited_by']} | {r['edited_at']}")
 
 # =========================
 # EDIT
@@ -209,6 +280,71 @@ if st.button("Update"):
 
     st.success("Updated")
     st.rerun()
+
+# =========================
+# PDF EXPORT
+# =========================
+st.divider()
+st.subheader("⬇️ Download PDF")
+
+col1, col2 = st.columns(2)
+
+with col1:
+    start_date = st.date_input("Dari")
+
+with col2:
+    end_date = st.date_input("Sampai")
+
+pdf_df = pd.read_sql_query("""
+    SELECT *
+    FROM operan
+    WHERE unit = ?
+    AND tanggal BETWEEN ? AND ?
+    ORDER BY id DESC
+""", conn, params=(
+    selected_unit,
+    f"{start_date} 00:00:00",
+    f"{end_date} 23:59:59"
+))
+
+def generate_pdf(df):
+
+    buffer = BytesIO()
+    doc = SimpleDocTemplate(buffer, pagesize=landscape(A4))
+    styles = getSampleStyleSheet()
+
+    elements = []
+    elements.append(Paragraph("Operan Shift", styles["Title"]))
+    elements.append(Spacer(1, 12))
+
+    data = [list(df.columns)]
+
+    for r in df.values.tolist():
+        data.append(r)
+
+    table = Table(data)
+
+    table.setStyle(TableStyle([
+        ("BACKGROUND", (0,0), (-1,0), colors.grey),
+        ("TEXTCOLOR", (0,0), (-1,0), colors.whitesmoke),
+        ("GRID", (0,0), (-1,-1), 0.5, colors.black),
+        ("FONTNAME", (0,0), (-1,0), "Helvetica-Bold"),
+        ("FONTSIZE", (0,0), (-1,-1), 8),
+    ]))
+
+    elements.append(table)
+    doc.build(elements)
+
+    return buffer.getvalue()
+
+if not pdf_df.empty:
+
+    st.download_button(
+        "Download PDF",
+        generate_pdf(pdf_df),
+        file_name=f"operan_{selected_unit}.pdf",
+        mime="application/pdf"
+    )
 
 # =========================
 # FOOTER
