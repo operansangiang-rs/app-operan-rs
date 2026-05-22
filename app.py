@@ -155,19 +155,22 @@ if len(search) >= 3:
 st.divider()
 
 # =========================
-# INPUT FORM
+# INPUT FORM (Tata Letak Kolom Penjamin Diperbaiki)
 # =========================
 st.subheader(f"📝 Input Operan - {selected_unit}")
 with st.form("form_input", clear_on_submit=True):
     col1, col2 = st.columns(2)
+    
     with col1:
         waktu_input = datetime.now(jakarta).strftime("%Y-%m-%d %H:%M:%S")
         st.text_input("Tanggal", value=waktu_input, disabled=True)
         st.text_input("Shift", value=auto_shift, disabled=True)
         no_rm = st.text_input("No RM")
         nama_pasien = st.text_input("Nama Pasien")
-    with col2:
+        # Pilihan penjamin berada di posisi kolom kiri tepat di bawah nama pasien
         penjamin = st.selectbox("Jenis Penjamin / Pembiayaan", ["BPJS", "Umum", "Asuransi Swasta / Perusahaan"])
+        
+    with col2:
         kamar = st.text_input("Kamar / Bed")
         diagnosa = st.text_input("Diagnosa Medis / Konsul Spesialis (e.g., Sp.PD / Sp.B)")
         pj_operan = st.text_input("PJ Penyerah Operan")
