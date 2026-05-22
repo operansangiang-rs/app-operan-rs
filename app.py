@@ -227,7 +227,16 @@ for _, r in df.iterrows():
 
         st.write(f"🏠 {r['kamar']} | 🧾 {r['diagnosa']} | 👨‍⚕️ {r['pj_operan']}")
 
-        colA, colB = st.columns([1, 1])
+      colA, colB = st.columns([1, 1])
+
+if colA.button("📄 Detail", key=f"detail_{r['id']}"):
+    if st.session_state["open_detail"] == r["id"]:
+        st.session_state["open_detail"] = None
+    else:
+        st.session_state["open_detail"] = r["id"]
+
+if colB.button("🗑 Hapus", key=f"del_{r['id']}"):
+    st.session_state["confirm_delete"] = r["id"]
 
         # =========================
         # BUTTON DETAIL (INLINE)
