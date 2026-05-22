@@ -1,118 +1,363 @@
 import streamlit as st
+import sqlite3
 import pandas as pd
-from streamlit_gsheets import GSheetsConnection
+from io import BytesIO
+from datetime import datetime
+import pytz
+
+from reportlab.platypus import (
+    SimpleDocTemplate,
+    Table,
+    TableStyle,
+    Paragraph,
+    Spacer
+)
+
+from reportlab.lib import colors
+from reportlab.lib.styles import getSampleStyleSheet
+from reportlab.lib.pagesizes import landscape, A4
 
 # =========================
 # CONFIG
 # =========================
 st.set_page_config(
-    page_title="Operan RS",
+    page_title="Operan Shift RS Sari Asih Sangiang",
+    page_icon="🏥",
     layout="wide"
 )
 
-st.title("Operan RS")
+st.title("🏥 Operan Shift RS Sari Asih Sangiang")
 
 # =========================
-# KONEKSI GOOGLE SHEETS
+# TIMEZONE
+# =========================
+jakarta = pytz.timezone("Asia/Jakarta")
+
+# =========================
+# DB
+# =========================
+@st.cache_resource
+def conn_db():
+    conn = sqlite3.connect("operan.db", check_same_thread=False)
+    conn.execute("PRAGMA journal_mode=WAL;")
+    conn.execute("PRAGMA synchronous=NORMAL;")
+    return conn
+
+conn = conn_db()
+c = conn.cursor()
+
+# =========================
+# AUTO DELETE > 40 HARI (TAMBAHAN BARU)
 # =========================
 try:
-    conn = st.connection(
-        "gsheets",
-        type=GSheetsConnection
-    )
-
+    c.execute("""
+        DELETE FROM operan
+        WHERE julianday('now') - julianday(tanggal) > 40
+    """)
+    conn.commit()
 except Exception as e:
-    st.error(f"Gagal koneksi Google Sheets: {e}")
-    st.stop()
+    print("Auto delete error:", e)
 
 # =========================
-# NAMA WORKSHEET
+# TABLE
 # =========================
-WORKSHEET = "Database_Operan_Shift"
-
-# =========================
-# LOAD DATA
-# =========================
-try:
-    df = conn.read(
-        worksheet=WORKSHEET,
-        ttl=0
-    )
-
-    # Jika sheet kosong
-    if df is None or df.empty:
-        df = pd.DataFrame(columns=[
-            "Tanggal",
-            "Ruangan",
-            "Keterangan"
-        ])
-
-except Exception as e:
-
-    st.error(f"Gagal membaca data: {e}")
-
-    df = pd.DataFrame(columns=[
-        "Tanggal",
-        "Ruangan",
-        "Keterangan"
-    ])
+c.execute("""
+CREATE TABLE IF NOT EXISTS operan (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    tanggal TEXT,
+    unit TEXT,
+    shift TEXT,
+    no_rm TEXT,
+    nama_pasien TEXT,
+    kamar TEXT,
+    diagnosa TEXT,
+    operan TEXT,
+    pj_operan TEXT,
+    edited_by TEXT,
+    edited_at TEXT
+)
+""")
+conn.commit()
 
 # =========================
-# FORM INPUT
+# AUTO SHIFT
 # =========================
-with st.form("form_operan"):
+jam = datetime.now(jakarta).hour
 
-    tanggal = st.date_input("Tanggal")
-
-    ruangan = st.text_input("Ruangan")
-
-    keterangan = st.text_area("Keterangan")
-
-    submit = st.form_submit_button("Simpan Data")
+if jam < 14:
+    auto_shift = "Pagi"
+elif jam < 21:
+    auto_shift = "Sore"
+else:
+    auto_shift = "Malam"
 
 # =========================
-# SIMPAN DATA
+# UNIT LIST
+# =========================
+unit_list = [
+    "ICU","RPU LT 1","RPU LT 2","RPU LT 3 GL","RPU LT 3 GB",
+    "RPU LT 4","RPU LT 5","Hemodialisa","Kamar Operasi",
+    "IGD","NICU","PICU"
+]
+
+st.sidebar.title("🏥 Pilih Unit")
+selected_unit = st.sidebar.selectbox("Unit", unit_list)
+
+# =========================
+# CACHE DATA
+# =========================
+@st.cache_data(ttl=10)
+def load_data(unit):
+    return pd.read_sql_query("""
+        SELECT *
+        FROM operan
+        WHERE unit = ?
+        ORDER BY id DESC
+        LIMIT 100
+    """, conn, params=(unit,))
+
+# =========================
+# SEARCH
+# =========================
+st.subheader("🔎 Cari Pasien")
+
+search = st.text_input("Cari No RM / Nama")
+
+if len(search) >= 3:
+
+    df_search = pd.read_sql_query("""
+        SELECT *
+        FROM operan
+        WHERE no_rm LIKE ?
+        OR nama_pasien LIKE ?
+        ORDER BY id DESC
+        LIMIT 50
+    """, conn, params=(f"%{search}%", f"%{search}%"))
+
+    st.dataframe(df_search, use_container_width=True, height=300)
+
+st.divider()
+
+# =========================
+# INPUT
+# =========================
+st.subheader(f"📝 Input Operan - {selected_unit}")
+
+with st.form("form"):
+
+    col1, col2 = st.columns(2)
+
+    with col1:
+        tanggal = datetime.now(jakarta).strftime("%Y-%m-%d %H:%M:%S")
+
+        st.text_input("Tanggal", value=tanggal, disabled=True)
+        st.text_input("Shift", value=auto_shift, disabled=True)
+
+        shift = auto_shift
+
+        no_rm = st.text_input("No RM")
+        nama_pasien = st.text_input("Nama Pasien")
+
+    with col2:
+        kamar = st.text_input("Kamar")
+        diagnosa = st.text_input("Diagnosa")
+        pj_operan = st.text_input("PJ Operan")
+
+    operan = st.text_area("Operan", height=130, max_chars=1500)
+
+    submit = st.form_submit_button("Simpan")
+
+# =========================
+# SAVE
 # =========================
 if submit:
 
-    try:
+    if no_rm and nama_pasien:
 
-        # Data baru
-        data_baru = pd.DataFrame([{
-            "Tanggal": str(tanggal),
-            "Ruangan": ruangan,
-            "Keterangan": keterangan
-        }])
+        c.execute("""
+            INSERT INTO operan (
+                tanggal, unit, shift,
+                no_rm, nama_pasien,
+                kamar, diagnosa,
+                operan, pj_operan
+            )
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+        """, (
+            tanggal, selected_unit, shift,
+            no_rm, nama_pasien,
+            kamar, diagnosa,
+            operan, pj_operan
+        ))
 
-        # Gabungkan data lama + baru
-        df_baru = pd.concat(
-            [df, data_baru],
-            ignore_index=True
-        )
+        conn.commit()
 
-        # Reset index
-        df_baru = df_baru.reset_index(drop=True)
+        load_data.clear()
 
-        # Simpan ke Google Sheets
-        conn.update(
-            worksheet=WORKSHEET,
-            data=df_baru
-        )
-
-        st.success("Data berhasil disimpan")
-
+        st.success("Tersimpan")
         st.rerun()
 
-    except Exception as e:
+# =========================
+# DATA LIST (INLINE DETAIL FIX)
+# =========================
+st.subheader("📋 Data Operan")
 
-        st.error(f"Gagal menyimpan data: {e}")
+df = pd.read_sql_query("""
+SELECT *
+FROM operan
+WHERE unit = ?
+ORDER BY id DESC
+LIMIT 100
+""", conn, params=(selected_unit,))
+
+if "open_detail" not in st.session_state:
+    st.session_state["open_detail"] = None
+
+for _, r in df.iterrows():
+
+    with st.container():
+        st.markdown("---")
+
+        col1, col2, col3, col4 = st.columns(4)
+
+        col1.write(f"📅 {r['tanggal']}")
+        col2.write(f"⏱ {r['shift']}")
+        col3.write(f"🆔 {r['no_rm']}")
+        col4.write(f"👤 {r['nama_pasien']}")
+
+        st.write(f"🏠 {r['kamar']} | 🧾 {r['diagnosa']} | 👨‍⚕️ {r['pj_operan']}")
+
+        colA, colB = st.columns([1, 1])
+
+        # =========================
+        # BUTTON DETAIL (INLINE)
+        # =========================
+        if colA.button("📄 Detail", key=f"detail_{r['id']}"):
+
+            # toggle buka/tutup
+            if st.session_state["open_detail"] == r["id"]:
+                st.session_state["open_detail"] = None
+            else:
+                st.session_state["open_detail"] = r["id"]
+
+        # =========================
+        # BUTTON DELETE
+        # =========================
+        if colB.button("🗑 Hapus", key=f"del_{r['id']}"):
+
+            c.execute("DELETE FROM operan WHERE id=?", (r["id"],))
+            conn.commit()
+            st.rerun()
+
+        # =========================
+        # DETAIL MUNCUL DI BAWAH ITEM YANG DIPILIH
+        # =========================
+        if st.session_state["open_detail"] == r["id"]:
+
+            st.info(r["operan"])
+            st.caption(f"✏️ Edit: {r['edited_by']} | {r['edited_at']}")
 
 # =========================
-# TAMPILKAN DATA
+# DETAIL VIEW
 # =========================
-st.subheader("Database Operan Shift")
+if "detail" in st.session_state:
 
-st.dataframe(
-    df,
-    use_container_width=True
-)
+    data = st.session_state["detail"]
+
+    st.divider()
+
+    st.subheader(f"📄 Detail Operan - {data['nama']}")
+
+    st.caption(f"RM: {data['rm']} | {data['tanggal']}")
+
+    st.info(data["operan"])
+
+# =========================
+# EDIT
+# =========================
+st.divider()
+st.subheader("✏️ Edit Operan")
+
+edit_rm = st.text_input("No RM Edit")
+edit_by = st.text_input("Nama Pengedit")
+edit_text = st.text_area("Operan Baru")
+
+if st.button("Update"):
+
+    waktu = datetime.now(jakarta).strftime("%Y-%m-%d %H:%M:%S")
+
+    c.execute("""
+        UPDATE operan
+        SET operan = ?, edited_by = ?, edited_at = ?
+        WHERE no_rm = ?
+    """, (edit_text, edit_by, waktu, edit_rm))
+
+    conn.commit()
+
+    load_data.clear()
+
+    st.success("Updated")
+    st.rerun()
+
+# =========================
+# PDF EXPORT
+# =========================
+st.divider()
+st.subheader("⬇️ Download PDF")
+
+col1, col2 = st.columns(2)
+
+with col1:
+    start_date = st.date_input("Dari")
+
+with col2:
+    end_date = st.date_input("Sampai")
+
+pdf_df = pd.read_sql_query("""
+    SELECT *
+    FROM operan
+    WHERE unit = ?
+    AND date(tanggal) BETWEEN date(?) AND date(?)
+    ORDER BY id DESC
+""", conn, params=(selected_unit, str(start_date), str(end_date)))
+
+def generate_pdf(df):
+
+    buffer = BytesIO()
+    doc = SimpleDocTemplate(buffer, pagesize=landscape(A4))
+    styles = getSampleStyleSheet()
+
+    elements = []
+    elements.append(Paragraph("Operan Shift", styles["Title"]))
+    elements.append(Spacer(1, 12))
+
+    data = [list(df.columns)]
+
+    for r in df.values.tolist():
+        data.append(r)
+
+    table = Table(data)
+
+    table.setStyle(TableStyle([
+        ("BACKGROUND", (0,0), (-1,0), colors.grey),
+        ("TEXTCOLOR", (0,0), (-1,0), colors.whitesmoke),
+        ("GRID", (0,0), (-1,-1), 0.5, colors.black),
+        ("FONTNAME", (0,0), (-1,0), "Helvetica-Bold"),
+        ("FONTSIZE", (0,0), (-1,-1), 8),
+    ]))
+
+    elements.append(table)
+    doc.build(elements)
+
+    pdf = buffer.getvalue()
+    buffer.close()
+
+    return pdf
+
+if not pdf_df.empty:
+
+    st.download_button(
+        "Download PDF",
+        generate_pdf(pdf_df),
+        file_name=f"operan_{selected_unit}.pdf",
+        mime="application/pdf"
+    )
