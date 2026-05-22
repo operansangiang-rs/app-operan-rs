@@ -137,21 +137,30 @@ try:
     columns_info = c.fetchall()
     
     if backup_rows:
-        backup_buffer = BytesIO()
-        mem_conn = sqlite3.connect(backup_buffer)
+        # Pake file temp lokal sementara di server, bukan BytesIO langsung ke sqlite3
+        temp_filename = "temp_backup.db"
+        
+        mem_conn = sqlite3.connect(temp_filename)
         mem_c = mem_conn.cursor()
         
-        create_table_sql = "CREATE TABLE operan (" + ", ".join([f"{col[1]} {col[2]}" for col in columns_info]) + ")"
+        create_table_sql = "CREATE TABLE IF NOT EXISTS operan (" + ", ".join([f"{col[1]} {col[2]}" for col in columns_info]) + ")"
         mem_c.execute(create_table_sql)
+        
+        # Bersihkan data lama di file temp jika ada sisa proses sebelumnya
+        mem_c.execute("DELETE FROM operan")
         
         placeholders = ", ".join(["?"] * len(columns_info))
         mem_c.executemany(f"INSERT INTO operan VALUES ({placeholders})", backup_rows)
         mem_conn.commit()
         mem_conn.close()
         
+        # Baca file temp tadi ke dalam bentuk bytes agar bisa didownload
+        with open(temp_filename, "rb") as f:
+            db_bytes = f.read()
+            
         st.sidebar.download_button(
             label="💾 Backup DB (40 Hari Terakhir)",
-            data=backup_buffer.getvalue(),
+            data=db_bytes,
             file_name=f"backup_operan_RS_{tgl_file_mulai}_sampai_{tgl_file_selesai}.db",
             mime="application/octet-stream",
             help="Klik untuk mengunduh database seluruh unit khusus 40 hari terakhir saja.",
@@ -164,7 +173,6 @@ except Exception as error_backup:
     st.sidebar.error(f"Gagal menyiapkan backup: {error_backup}")
 
 st.sidebar.divider()
-
 
 # =========================
 # DIALOG UNTUK EDIT DATA
