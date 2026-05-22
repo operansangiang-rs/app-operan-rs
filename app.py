@@ -60,7 +60,7 @@ try:
 except Exception as e:
     print("Auto delete / indexing error:", e)
 
-# Pembuatan Table (Ditambahkan kolom penjamin)
+# Pembuatan Table Awal jika belum ada
 c.execute("""
 CREATE TABLE IF NOT EXISTS operan (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -79,6 +79,16 @@ CREATE TABLE IF NOT EXISTS operan (
 )
 """)
 conn.commit()
+
+# 🛠️ AUTO MIGRATION: Pengaman Data Lama Mas Lian agar tidak bentrok/crash
+try:
+    c.execute("PRAGMA table_info(operan)")
+    columns = [column[1] for column in c.fetchall()]
+    if "penjamin" not in columns:
+        c.execute("ALTER TABLE operan ADD COLUMN penjamin TEXT DEFAULT 'Umum'")
+        conn.commit()
+except Exception as e:
+    print("Migration Error:", e)
 
 # =========================
 # SHIFT AUTO
@@ -110,9 +120,10 @@ selected_unit = st.sidebar.selectbox("Unit", unit_list)
 def edit_dialog(row_data):
     st.write(f"Pasien: **{row_data['nama_pasien']}** ({row_data['no_rm']})")
     
-    # Input penjamin di edit dialog menggunakan index penyesuaian
+    # Input penjamin di edit dialog menggunakan index penyesuaian (Default Umum jika data lama kosong)
     list_penjamin = ["BPJS", "Umum", "Asuransi Swasta / Perusahaan"]
-    default_idx = list_penjamin.index(row_data['penjamin']) if row_data['penjamin'] in list_penjamin else 0
+    current_penjamin = row_data['penjamin'] if pd.notna(row_data['penjamin']) else "Umum"
+    default_idx = list_penjamin.index(current_penjamin) if current_penjamin in list_penjamin else 1
     new_penjamin = st.selectbox("Jenis Penjamin", list_penjamin, index=default_idx)
     
     new_kamar = st.text_input("Kamar / Bed", value=row_data['kamar'])
@@ -155,7 +166,7 @@ if len(search) >= 3:
 st.divider()
 
 # =========================
-# INPUT FORM (Tata Letak Kolom Penjamin Diperbaiki)
+# INPUT FORM
 # =========================
 st.subheader(f"📝 Input Operan - {selected_unit}")
 with st.form("form_input", clear_on_submit=True):
@@ -179,7 +190,6 @@ with st.form("form_input", clear_on_submit=True):
     submit = st.form_submit_button("Simpan Data")
 
 if submit:
-    # Validasi ketat untuk menjamin keselamatan pasien di lapangan
     if not (no_rm and nama_pasien and kamar and diagnosa and operan and pj_operan):
         st.error("❌ Gagal menyimpan! Semua kolom wajib diisi demi keselamatan dan ketepatan operan pasien.")
     else:
@@ -208,12 +218,12 @@ else:
     pasien_unik = df['no_rm'].unique()
     
     for rm in pasien_unik:
-        # Menyaring seluruh riwayat instruksi milik No RM ini
         df_pasien = df[df['no_rm'] == rm]
         info_terbaru = df_pasien.iloc[0]
         
-        # Penanda visual warna penjamin (Hijau untuk BPJS, Biru untuk Umum/Lainnya)
-        badge_penjamin = "🟢 BPJS" if info_terbaru['penjamin'] == "BPJS" else "🔵 " + str(info_terbaru['penjamin'])
+        # Pengaman ekstra jika ada kolom penjamin di data lama yang bernilai NaN / Kosong
+        val_penjamin = info_terbaru['penjamin'] if pd.notna(info_terbaru['penjamin']) else "Umum"
+        badge_penjamin = "🟢 BPJS" if val_penjamin == "BPJS" else "🔵 " + str(val_penjamin)
         
         # Kontainer Utama Pasien
         with st.container(border=True):
@@ -225,9 +235,8 @@ else:
             
             st.markdown("<p style='margin:2px 0px; color:#777; font-size:13px;'><b>🩺 Timeline Instruksi Medis & Operan Shift:</b></p>", unsafe_allow_html=True)
             
-            # Looping instruksi dokter/shift yang masuk untuk pasien ini (Timeline gaya chat)
+            # Looping instruksi dokter/shift yang masuk untuk pasien ini
             for _, r in df_pasien.iterrows():
-                # Membedakan warna background chat bubble berdasarkan shift pagi/sore-malam
                 avatar_style = "user" if r['shift'] == "Pagi" else "assistant"
                 with st.chat_message(avatar_style):
                     st.markdown(f"⏱ **Shift {r['shift']}** | 📅 {r['tanggal']} | 👨‍⚕️ PJ: *{r['pj_operan']}*")
@@ -287,7 +296,6 @@ def generate_pdf(dataframe):
     )
     styles = getSampleStyleSheet()
     
-    # Custom Style khusus untuk isi tabel agar teks otomatis turun ke bawah (Wrap)
     cell_style = ParagraphStyle(
         'CellText',
         parent=styles['Normal'],
@@ -308,7 +316,6 @@ def generate_pdf(dataframe):
     elements.append(Paragraph(f"Unit: {selected_unit} | Periode: {start_date} s/d {end_date}", styles["Heading3"]))
     elements.append(Spacer(1, 15))
 
-    # Judul Kolom dengan Tambahan Status Penjamin
     headers = ["Tanggal", "Shift", "No RM", "Nama Pasien", "Penjamin", "Kamar", "Diagnosa", "Catatan Operan", "PJ"]
     data = [[Paragraph(f"<b>{h}</b>", header_style) for h in headers]]
 
@@ -316,12 +323,11 @@ def generate_pdf(dataframe):
         formatted_row = [Paragraph(str(cell), cell_style) for cell in row]
         data.append(formatted_row)
 
-    # Set proporsi lebar kolom total pas ~750 pt (A4 Landscape aman dari margin keluar)
     col_widths = [75, 35, 45, 95, 55, 45, 90, 260, 50]
     
     table = Table(data, colWidths=col_widths, repeatRows=1)
     table.setStyle(TableStyle([
-        ("BACKGROUND", (0,0), (-1,0), colors.HexColor("#1A365D")), # Tema Navy Medis Profesional
+        ("BACKGROUND", (0,0), (-1,0), colors.HexColor("#1A365D")), 
         ("ALIGN", (0,0), (-1,-1), "LEFT"),
         ("VALIGN", (0,0), (-1,-1), "TOP"),
         ("GRID", (0,0), (-1,-1), 0.5, colors.grey),
