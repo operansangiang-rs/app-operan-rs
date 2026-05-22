@@ -125,14 +125,14 @@ search = st.text_input("Cari No RM / Nama")
 
 if len(search) >= 3:
 
-   df_search = pd.read_sql_query("""
-    SELECT *
-    FROM operan
-    WHERE (no_rm LIKE ? OR nama_pasien LIKE ?)
-    AND date(tanggal) BETWEEN date('now', '-15 day') AND date('now')
-    ORDER BY id DESC
-    LIMIT 50
-""", conn, params=(f"%{search}%", f"%{search}%"))
+    df_search = pd.read_sql_query("""
+        SELECT *
+        FROM operan
+        WHERE no_rm LIKE ?
+        OR nama_pasien LIKE ?
+        ORDER BY id DESC
+        LIMIT 50
+    """, conn, params=(f"%{search}%", f"%{search}%"))
 
     st.dataframe(df_search, use_container_width=True, height=300)
 
