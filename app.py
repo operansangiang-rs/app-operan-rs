@@ -316,10 +316,13 @@ pdf_df = pd.read_sql_query("""
     SELECT *
     FROM operan
     WHERE unit = ?
-    AND date(tanggal) BETWEEN date('now', '-35 day') AND date('now')
+    AND tanggal BETWEEN ? AND ?
     ORDER BY id DESC
-""", conn, params=(selected_unit, str(start_date), str(end_date)))
-
+""", conn, params=(
+    selected_unit,
+    f"{start_date} 00:00:00",
+    f"{end_date} 23:59:59"
+))
 def generate_pdf(df):
 
     buffer = BytesIO()
