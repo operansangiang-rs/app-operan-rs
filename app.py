@@ -361,3 +361,12 @@ if not pdf_df.empty:
         file_name=f"operan_{selected_unit}.pdf",
         mime="application/pdf"
     )
+======================================================
+    st.markdown("---")
+st.markdown(
+    "<div style='text-align: center; color: #888; font-size: 12px;'>"
+    "🏥 Sistem Operan Shift RS Sari Asih Sangiang<br>"
+    "Developed by <b>RSD 2026</b> © All Rights Reserved"
+    "</div>",
+    unsafe_allow_html=True
+)
