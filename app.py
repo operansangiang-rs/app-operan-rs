@@ -45,14 +45,22 @@ def conn_db():
 conn = conn_db()
 c = conn.cursor()
 
-# Auto Delete data lama (>15 hari)
+# Auto Delete data lama (>180 hari / 6 bulan secara bertahap) & Indexing Efisiensi
 try:
-    c.execute("DELETE FROM operan WHERE julianday('now') - julianday(tanggal) > 15")
+    c.execute("""
+        DELETE FROM operan 
+        WHERE julianday('now', 'localtime') - julianday(tanggal) > 180
+    """)
+    # Menambahkan index agar query pencarian arsip data 6 bulan tetap secepat kilat
+    c.execute("CREATE INDEX IF NOT EXISTS idx_tanggal ON operan(tanggal);")
+    c.execute("CREATE INDEX IF NOT EXISTS idx_unit ON operan(unit);")
+    c.execute("CREATE INDEX IF NOT EXISTS idx_no_rm ON operan(no_rm);")
+    c.execute("CREATE INDEX IF NOT EXISTS idx_nama ON operan(nama_pasien);")
     conn.commit()
 except Exception as e:
-    print("Auto delete error:", e)
+    print("Auto delete / indexing error:", e)
 
-# Pembuatan Table
+# Pembuatan Table (Ditambahkan kolom penjamin)
 c.execute("""
 CREATE TABLE IF NOT EXISTS operan (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -66,7 +74,8 @@ CREATE TABLE IF NOT EXISTS operan (
     operan TEXT,
     pj_operan TEXT,
     edited_by TEXT,
-    edited_at TEXT
+    edited_at TEXT,
+    penjamin TEXT
 )
 """)
 conn.commit()
@@ -95,22 +104,30 @@ st.sidebar.title("🏥 Pilih Unit")
 selected_unit = st.sidebar.selectbox("Unit", unit_list)
 
 # =========================
-# DIALOG UNTUK EDIT DATA (Lebih Aman & Presisi)
+# DIALOG UNTUK EDIT DATA
 # =========================
 @st.dialog("✏️ Edit Data Operan")
 def edit_dialog(row_data):
     st.write(f"Pasien: **{row_data['nama_pasien']}** ({row_data['no_rm']})")
+    
+    # Input penjamin di edit dialog menggunakan index penyesuaian
+    list_penjamin = ["BPJS", "Umum", "Asuransi Swasta / Perusahaan"]
+    default_idx = list_penjamin.index(row_data['penjamin']) if row_data['penjamin'] in list_penjamin else 0
+    new_penjamin = st.selectbox("Jenis Penjamin", list_penjamin, index=default_idx)
+    
+    new_kamar = st.text_input("Kamar / Bed", value=row_data['kamar'])
+    new_diagnosa = st.text_input("Diagnosa / Spesialis", value=row_data['diagnosa'])
     new_operan = st.text_area("Isi Operan Baru", value=row_data['operan'], height=150)
     user_edit = st.text_input("Nama Pengedit / PJ Baru", value=row_data['pj_operan'])
     
     if st.button("Simpan Perubahan"):
-        if new_operan.strip() and user_edit.strip():
+        if new_operan.strip() and user_edit.strip() and new_kamar.strip() and new_diagnosa.strip():
             waktu_sekarang = datetime.now(jakarta).strftime("%Y-%m-%d %H:%M:%S")
             c.execute("""
                 UPDATE operan 
-                SET operan = ?, edited_by = ?, edited_at = ?, pj_operan = ? 
+                SET operan = ?, edited_by = ?, edited_at = ?, pj_operan = ?, penjamin = ?, kamar = ?, diagnosa = ?
                 WHERE id = ?
-            """, (new_operan, user_edit, waktu_sekarang, user_edit, row_data['id']))
+            """, (new_operan, user_edit, waktu_sekarang, user_edit, new_penjamin, new_kamar, new_diagnosa, row_data['id']))
             conn.commit()
             st.success("Data berhasil diperbarui!")
             st.rerun()
@@ -118,19 +135,22 @@ def edit_dialog(row_data):
             st.error("Semua kolom harus diisi!")
 
 # =========================
-# SEARCH
+# SEARCH (Menjangkau s/d 6 Bulan Riwayat Pasien)
 # =========================
-st.subheader("🔎 Cari Pasien (Semua Unit)")
-search = st.text_input("Cari No RM / Nama")
+st.subheader("🔎 Cari Riwayat Pasien (Arsip 6 Bulan Terakhir)")
+search = st.text_input("Cari No RM / Nama Pasien")
 
 if len(search) >= 3:
     df_search = pd.read_sql_query("""
-        SELECT tanggal, unit, shift, no_rm, nama_pasien, kamar, diagnosa, operan, pj_operan 
+        SELECT tanggal, unit, shift, no_rm, nama_pasien, penjamin, kamar, diagnosa, operan, pj_operan 
         FROM operan
         WHERE no_rm LIKE ? OR nama_pasien LIKE ?
-        ORDER BY id DESC LIMIT 50
+        ORDER BY tanggal DESC LIMIT 50
     """, conn, params=(f"%{search}%", f"%{search}%"))
-    st.dataframe(df_search, use_container_width=True)
+    if not df_search.empty:
+        st.dataframe(df_search, use_container_width=True)
+    else:
+        st.info("Tidak ditemukan riwayat kunjungan pasien dengan kata kunci tersebut.")
 
 st.divider()
 
@@ -147,80 +167,97 @@ with st.form("form_input", clear_on_submit=True):
         no_rm = st.text_input("No RM")
         nama_pasien = st.text_input("Nama Pasien")
     with col2:
+        penjamin = st.selectbox("Jenis Penjamin / Pembiayaan", ["BPJS", "Umum", "Asuransi Swasta / Perusahaan"])
         kamar = st.text_input("Kamar / Bed")
-        diagnosa = st.text_input("Diagnosa Medis")
+        diagnosa = st.text_input("Diagnosa Medis / Konsul Spesialis (e.g., Sp.PD / Sp.B)")
         pj_operan = st.text_input("PJ Penyerah Operan")
         
     operan = st.text_area("Isi Instruksi / Catatan Operan", height=130, max_chars=1500)
     submit = st.form_submit_button("Simpan Data")
 
 if submit:
-    # Validasi ketat agar tidak ada data kosong yang krusial
+    # Validasi ketat untuk menjamin keselamatan pasien di lapangan
     if not (no_rm and nama_pasien and kamar and diagnosa and operan and pj_operan):
-        st.error("❌ Gagal menyimpan! Semua kolom wajib diisi demi keselamatan pasien.")
+        st.error("❌ Gagal menyimpan! Semua kolom wajib diisi demi keselamatan dan ketepatan operan pasien.")
     else:
         c.execute("""
-            INSERT INTO operan (tanggal, unit, shift, no_rm, nama_pasien, kamar, diagnosa, operan, pj_operan)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
-        """, (waktu_input, selected_unit, auto_shift, no_rm, nama_pasien, kamar, diagnosa, operan, pj_operan))
+            INSERT INTO operan (tanggal, unit, shift, no_rm, nama_pasien, kamar, diagnosa, operan, pj_operan, penjamin)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        """, (waktu_input, selected_unit, auto_shift, no_rm, nama_pasien, kamar, diagnosa, operan, pj_operan, penjamin))
         conn.commit()
         st.success("✅ Data operan berhasil disimpan!")
         st.rerun()
 
 # =========================
-# DATA LIST
+# DATA LIST (Tampilan Terkunci 7 Hari & Dikelompokkan per Pasien)
 # =========================
 st.subheader(f"📋 Data Operan Aktif (7 Hari Terakhir) - {selected_unit}")
 df = pd.read_sql_query("""
     SELECT * FROM operan 
-    WHERE unit = ? AND julianday('now') - julianday(tanggal) <= 7
-    ORDER BY id DESC
+    WHERE unit = ? AND julianday('now', 'localtime') - julianday(tanggal) <= 7
+    ORDER BY tanggal DESC
 """, conn, params=(selected_unit,))
 
 if df.empty:
-    st.info("Belum ada data operan untuk unit ini dalam 7 hari terakhir.")
+    st.info("Belum ada data operan aktif untuk unit ini dalam 7 hari terakhir.")
 else:
-    for _, r in df.iterrows():
+    # Mengambil list No RM unik agar pasien tidak tampil dobel-dobel di menu utama
+    pasien_unik = df['no_rm'].unique()
+    
+    for rm in pasien_unik:
+        # Menyaring seluruh riwayat instruksi milik No RM ini
+        df_pasien = df[df['no_rm'] == rm]
+        info_terbaru = df_pasien.iloc[0]
+        
+        # Penanda visual warna penjamin (Hijau untuk BPJS, Biru untuk Umum/Lainnya)
+        badge_penjamin = "🟢 BPJS" if info_terbaru['penjamin'] == "BPJS" else "🔵 " + str(info_terbaru['penjamin'])
+        
+        # Kontainer Utama Pasien
         with st.container(border=True):
-            c1, c2, c3, c4 = st.columns(4)
-            c1.markdown(f"📅 **Tanggal:** {r['tanggal']}")
-            c2.markdown(f"⏱ **Shift:** {r['shift']}")
-            c3.markdown(f"🏥 **No RM:** {r['no_rm']}")
-            c4.markdown(f"👤 **Pasien:** {r['nama_pasien']}")
+            col_p1, col_p2, col_p3, col_p4 = st.columns([1.2, 2, 1.2, 1])
+            col_p1.markdown(f"🏥 **No RM:** {info_terbaru['no_rm']}")
+            col_p2.markdown(f"👤 **Nama Pasien:** {info_terbaru['nama_pasien']}")
+            col_p3.markdown(f"💳 **Penjamin:** {badge_penjamin}")
+            col_p4.markdown(f"🏠 **Kamar:** {info_terbaru['kamar']}")
             
-            st.markdown(f"🏠 **Kamar:** {r['kamar']} | 🧾 **Diagnosa:** {r['diagnosa']} | 👨‍⚕️ **PJ:** {r['pj_operan']}")
+            st.markdown("<p style='margin:2px 0px; color:#777; font-size:13px;'><b>🩺 Timeline Instruksi Medis & Operan Shift:</b></p>", unsafe_allow_html=True)
             
-            # Tombol Aksi yang Jauh Lebih Rapi
-            cA, cB, cC = st.columns([1, 1, 4])
-            
-            with cA:
-                # Toggle detail langsung memanfaatkan ekspander bawaan agar UI bersih
-                with st.expander("📄 Lihat Catatan"):
-                    st.info(r['operan'])
+            # Looping instruksi dokter/shift yang masuk untuk pasien ini (Timeline gaya chat)
+            for _, r in df_pasien.iterrows():
+                # Membedakan warna background chat bubble berdasarkan shift pagi/sore-malam
+                avatar_style = "user" if r['shift'] == "Pagi" else "assistant"
+                with st.chat_message(avatar_style):
+                    st.markdown(f"⏱ **Shift {r['shift']}** | 📅 {r['tanggal']} | 👨‍⚕️ PJ: *{r['pj_operan']}*")
+                    st.markdown(f"🩺 **Diagnosa/Konsul:** {r['diagnosa']}")
+                    st.info(f"💬 {r['operan']}")
+                    
                     if r['edited_by']:
-                        st.caption(f"✏️ Diubah oleh: {r['edited_by']} ({r['edited_at']})")
-            with cB:
-                if st.button("✏️ Edit", key=f"btn_edit_{r['id']}"):
-                    edit_dialog(r)
-            with cC:
-                if st.button("🗑 Hapus", key=f"btn_del_{r['id']}"):
-                    st.session_state[f"confirm_del_{r['id']}"] = True
-            
-            # Konfirmasi hapus per baris yang stabil
-            if st.session_state.get(f"confirm_del_{r['id']}", False):
-                st.error(f"Apakah Anda yakin ingin menghapus data {r['nama_pasien']}?")
-                cx, cy = st.columns([1, 5])
-                if cx.button("Ya, Hapus", key=f"yes_del_{r['id']}"):
-                    c.execute("DELETE FROM operan WHERE id=?", (r['id'],))
-                    conn.commit()
-                    del st.session_state[f"confirm_del_{r['id']}"]
-                    st.rerun()
-                if cy.button("Batal", key=f"no_del_{r['id']}"):
-                    del st.session_state[f"confirm_del_{r['id']}"]
-                    st.rerun()
+                        st.caption(f"✏️ Terakhir diubah oleh: {r['edited_by']} ({r['edited_at']})")
+                        
+                    # Tombol Manajemen Aksi per baris instruksi
+                    cA, cB = st.columns([1, 8])
+                    with cA:
+                        if st.button("✏️ Edit", key=f"btn_edit_{r['id']}"):
+                            edit_dialog(r)
+                    with cB:
+                        if st.button("🗑 Hapus", key=f"btn_del_{r['id']}"):
+                            st.session_state[f"confirm_del_{r['id']}"] = True
+                            
+                    # Trigger konfirmasi hapus baris spesifik secara aman
+                    if st.session_state.get(f"confirm_del_{r['id']}", False):
+                        st.error("Apakah Anda yakin ingin menghapus catatan instruksi spesifik ini?")
+                        cx, cy = st.columns([1, 10])
+                        if cx.button("Ya, Hapus", key=f"yes_del_{r['id']}"):
+                            c.execute("DELETE FROM operan WHERE id=?", (r['id'],))
+                            conn.commit()
+                            del st.session_state[f"confirm_del_{r['id']}"]
+                            st.rerun()
+                        if cy.button("Batal", key=f"no_del_{r['id']}"):
+                            del st.session_state[f"confirm_del_{r['id']}"]
+                            st.rerun()
 
 # =========================
-# PDF EXPORT (Perbaikan Wrap Text)
+# PDF EXPORT (Mendukung s/d Rentang 6 Bulan)
 # =========================
 st.divider()
 st.subheader("⬇️ Rekap Cetak PDF")
@@ -232,7 +269,7 @@ with col_d2:
     end_date = st.date_input("Sampai Tanggal")
 
 pdf_df = pd.read_sql_query("""
-    SELECT tanggal, shift, no_rm, nama_pasien, kamar, diagnosa, operan, pj_operan
+    SELECT tanggal, shift, no_rm, nama_pasien, penjamin, kamar, diagnosa, operan, pj_operan
     FROM operan
     WHERE unit = ? AND tanggal BETWEEN ? AND ?
     ORDER BY tanggal ASC
@@ -268,22 +305,20 @@ def generate_pdf(dataframe):
     elements.append(Paragraph(f"Unit: {selected_unit} | Periode: {start_date} s/d {end_date}", styles["Heading3"]))
     elements.append(Spacer(1, 15))
 
-    # Judul Kolom yang Manusiawi
-    headers = ["Tanggal", "Shift", "No RM", "Nama Pasien", "Kamar", "Diagnosa", "Catatan Operan", "PJ"]
+    # Judul Kolom dengan Tambahan Status Penjamin
+    headers = ["Tanggal", "Shift", "No RM", "Nama Pasien", "Penjamin", "Kamar", "Diagnosa", "Catatan Operan", "PJ"]
     data = [[Paragraph(f"<b>{h}</b>", header_style) for h in headers]]
 
-    # Memasukkan data dan membungkusnya dengan Paragraph agar wrap-text berfungsi
     for row in dataframe.values.tolist():
         formatted_row = [Paragraph(str(cell), cell_style) for cell in row]
         data.append(formatted_row)
 
-    # Set proporsi lebar kolom (Total lebar kertas A4 Landscape setelah margin sekitar 792 pt)
-    # Kita berikan porsi terbesar untuk kolom Catatan Operan (kolom ke-7)
-    col_widths = [75, 35, 45, 95, 45, 95, 320, 50]
+    # Set proporsi lebar kolom total pas ~750 pt (A4 Landscape aman dari margin keluar)
+    col_widths = [75, 35, 45, 95, 55, 45, 90, 260, 50]
     
     table = Table(data, colWidths=col_widths, repeatRows=1)
     table.setStyle(TableStyle([
-        ("BACKGROUND", (0,0), (-1,0), colors.HexColor("#1A365D")), # Warna biru gelap medis
+        ("BACKGROUND", (0,0), (-1,0), colors.HexColor("#1A365D")), # Tema Navy Medis Profesional
         ("ALIGN", (0,0), (-1,-1), "LEFT"),
         ("VALIGN", (0,0), (-1,-1), "TOP"),
         ("GRID", (0,0), (-1,-1), 0.5, colors.grey),
