@@ -147,8 +147,7 @@ def edit_dialog(row_data):
 # SEARCH (Arsip 6 Bulan Terakhir)
 # =========================
 st.subheader("🔎 Cari Riwayat Pasien")
-st.caption("💡 Menampilkan riwayat kunjungan pasien dalam rentang waktu 6 bulan terakhir.")
-search = st.text_input("Masukkan No RM atau Nama Pasien")
+search = st.text_input("Masukkan No RM / Nama Pasien", placeholder="Cari data (maksimal riwayat 6 bulan terakhir)...")
 
 if len(search) >= 3:
     df_search = pd.read_sql_query("""
