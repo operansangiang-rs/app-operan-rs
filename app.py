@@ -210,9 +210,9 @@ for _, r in df.iterrows():
     col1, col2, col3, col4 = st.columns(4)
 
     col1.write(f"📅 {r['tanggal']}")
-    col2.write(f"⏱ {r['shift']}")
-    col3.write(f"🆔 {r['no_rm']}")
-    col4.write(f"👤 {r['nama_pasien']}")
+    col2.write(f"⏱ Shift: {r['shift']}")
+    col3.write(f"🏥 No RM: {r['no_rm']}")
+    col4.write(f"👤 Pasien: {r['nama_pasien']}")
 
     st.write(f"🏠 {r['kamar']} | 🧾 {r['diagnosa']} | 👨‍⚕️ {r['pj_operan']}")
 
