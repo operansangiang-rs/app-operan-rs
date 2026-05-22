@@ -270,6 +270,40 @@ if st.button("Update"):
 
     waktu = datetime.now(jakarta).strftime("%Y-%m-%d %H:%M:%S")
 
+    # =========================
+    # CEK NO RM ADA ATAU TIDAK
+    # =========================
+    cek = c.execute("""
+        SELECT COUNT(*)
+        FROM operan
+        WHERE no_rm = ?
+    """, (edit_rm,)).fetchone()[0]
+
+    if cek == 0:
+        st.error("❌ Tidak ada No RM / pasien yang sesuai")
+
+    else:
+        # =========================
+        # UPDATE DATA TERAKHIR
+        # =========================
+        c.execute("""
+            UPDATE operan
+            SET operan = ?, edited_by = ?, edited_at = ?
+            WHERE id = (
+                SELECT id FROM operan
+                WHERE no_rm = ?
+                ORDER BY id DESC
+                LIMIT 1
+            )
+        """, (edit_text, edit_by, waktu, edit_rm))
+
+        conn.commit()
+
+        st.success("✅ Operan berhasil diupdate (data terakhir)")
+        st.rerun()
+
+    waktu = datetime.now(jakarta).strftime("%Y-%m-%d %H:%M:%S")
+
     c.execute("""
     UPDATE operan
     SET operan = ?, edited_by = ?, edited_at = ?
