@@ -369,13 +369,6 @@ def generate_pdf(dataframe):
 
 # Tombol Cetak PDF Utama
 if not pdf_df.empty:
-    # 💡 TAMBAHKAN NOTE INI DI ATAS TOMBOL DOWNLOAD
-    st.info("""
-    💡 **Pemberitahuan Sistem:** Demi keamanan rekam medis, Kepala Ruangan / PJ Shift 
-    diwajibkan mengunduh rekap PDF ini **setiap 1 bulan sekali** (setiap akhir bulan) 
-    untuk disimpan sebagai arsip internal komputer ruangan.
-    """)
-    
     st.download_button(
         label="📄 Download Rekap PDF Terfilter",
         data=generate_pdf(pdf_df),
