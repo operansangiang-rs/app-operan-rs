@@ -332,56 +332,51 @@ if not pdf_df.empty:
         mime="application/pdf"
     )
     
-    # 📊 SEKSI TAMBAHAN: HITUNG TOTAL PASIEN & GRAFIK (Berdasarkan Jumlah Pasien Unik / No RM)
+  # 📊 SEKSI TAMBAHAN: MENGGUNAKAN EXPANDER AGAR LAYAR TETAP RAPI (MODEL LIPAT)
     st.write("")
-    st.markdown("### 📊 Ringkasan Statistik & Grafik Pasien Terfilter")
-    
-    # Mengisi data penjamin kosong ke 'Umum' demi konsistensi grafik
-    pdf_df['penjamin'] = pdf_df['penjamin'].fillna('Umum').replace('', 'Umum')
-    
-    # Menghitung pasien unik (berdasarkan No RM) untuk akurasi jumlah pasien asli
-    df_pasien_unik = pdf_df.drop_duplicates(subset=['no_rm'])
-    total_pasien_periode = len(df_pasien_unik)
-    
-    # Hitung distribusi penjamin dari list pasien unik
-    counts = df_pasien_unik['penjamin'].value_counts()
-    total_bpjs = counts.get('BPJS', 0)
-    total_umum = counts.get('Umum', 0)
-    total_asuransi = counts.get('Asuransi Swasta / Perusahaan', 0)
-    
-    # Tampilan kartu angka (Metric Card)
-    m1, m2, m3, m4 = st.columns(4)
-    m1.metric(label="👥 Total Pasien Unik", value=f"{total_pasien_periode} Orang")
-    m2.metric(label="🟢 Total BPJS", value=f"{total_bpjs} Pasien")
-    m3.metric(label="🔵 Total Umum", value=f"{total_umum} Pasien")
-    m4.metric(label="🟠 Total Asuransi/Kerja", value=f"{total_asuransi} Pasien")
-    
-    # Tampilan Grafik Visual Berdampingan (Kolom Kiri Grafik Batang, Kolom Kanan Tabel Angka)
-    st.write("")
-    g1, g2 = st.columns([2, 1])
-    
-    with g1:
-        st.markdown("**Grafik Distribusi Penjamin Pasien (Bar Chart)**")
-        # Membuat Dataframe sederhana khusus untuk kebutuhan grafik Streamlit
-        chart_data = pd.DataFrame({
-            'Jenis Penjamin': counts.index,
-            'Jumlah Pasien': counts.values
-        }).set_index('Jenis Penjamin')
+    with st.expander("📊 Lihat Ringkasan Statistik & Grafik Pasien Terfilter", expanded=False):
         
-        # Merender grafik batang interaktif bawaan Streamlit
-        st.bar_chart(chart_data, color="#1A365D")
+        # Mengisi data penjamin kosong ke 'Umum' demi konsistensi grafik
+        pdf_df['penjamin'] = pdf_df['penjamin'].fillna('Umum').replace('', 'Umum')
         
-    with g2:
-        st.markdown("**Tabel Rincian Persentase**")
-        rekap_tabel = pd.DataFrame({
-            'Penjamin': counts.index,
-            'Total Pasien': counts.values,
-            'Persentase (%)': ((counts.values / total_pasien_periode) * 100).round(1)
-        })
-        st.dataframe(rekap_tabel, use_container_width=True, hide_index=True)
-
-else:
-    st.warning("Tidak ditemukan data pada rentang tanggal tersebut untuk dicetak maupun dianalisis.")
+        # Menghitung pasien unik (berdasarkan No RM) untuk akurasi jumlah pasien asli
+        df_pasien_unik = pdf_df.drop_duplicates(subset=['no_rm'])
+        total_pasien_periode = len(df_pasien_unik)
+        
+        # Hitung distribusi penjamin dari list pasien unik
+        counts = df_pasien_unik['penjamin'].value_counts()
+        total_bpjs = counts.get('BPJS', 0)
+        total_umum = counts.get('Umum', 0)
+        total_asuransi = counts.get('Asuransi Swasta / Perusahaan', 0)
+        
+        # Tampilan kartu angka (Metric Card)
+        m1, m2, m3, m4 = st.columns(4)
+        m1.metric(label="👥 Total Pasien Unik", value=f"{total_pasien_periode} Orang")
+        m2.metric(label="🟢 Total BPJS", value=f"{total_bpjs} Pasien")
+        m3.metric(label="🔵 Total Umum", value=f"{total_umum} Pasien")
+        m4.metric(label="🟠 Total Asuransi/Kerja", value=f"{total_asuransi} Pasien")
+        
+        # Tampilan Grafik Visual Berdampingan
+        st.write("")
+        g1, g2 = st.columns([2, 1])
+        
+        with g1:
+            st.markdown("**Grafik Distribusi Penjamin Pasien (Bar Chart)**")
+            chart_data = pd.DataFrame({
+                'Jenis Penjamin': counts.index,
+                'Jumlah Pasien': counts.values
+            }).set_index('Jenis Penjamin')
+            
+            st.bar_chart(chart_data, color="#1A365D")
+            
+        with g2:
+            st.markdown("**Tabel Rincian Persentase**")
+            rekap_tabel = pd.DataFrame({
+                'Penjamin': counts.index,
+                'Total Pasien': counts.values,
+                'Persentase (%)': ((counts.values / total_pasien_periode) * 100).round(1)
+            })
+            st.dataframe(rekap_tabel, use_container_width=True, hide_index=True)
 
 # =========================
 # FOOTER
