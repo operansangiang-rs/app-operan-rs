@@ -199,8 +199,8 @@ df = pd.read_sql_query("""
 SELECT *
 FROM operan
 WHERE unit = ?
+AND julianday('now') - julianday(tanggal) <= 7
 ORDER BY id DESC
-LIMIT 100
 """, conn, params=(selected_unit,))
 
 for _, r in df.iterrows():
