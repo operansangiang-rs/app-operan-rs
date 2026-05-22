@@ -296,11 +296,12 @@ with col2:
     end_date = st.date_input("Sampai")
 
 pdf_df = pd.read_sql_query("""
-    SELECT *
-    FROM operan
-    WHERE unit = ?
-    AND tanggal BETWEEN ? AND ?
-    ORDER BY id DESC
+SELECT *
+FROM operan
+WHERE unit = ?
+AND julianday('now') - julianday(tanggal) <= 35
+AND tanggal BETWEEN ? AND ?
+ORDER BY id DESC
 """, conn, params=(
     selected_unit,
     f"{start_date} 00:00:00",
