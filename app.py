@@ -211,7 +211,8 @@ LIMIT 100
 
 if "open_detail" not in st.session_state:
     st.session_state["open_detail"] = None
-
+if "confirm_delete" not in st.session_state:
+    st.session_state["confirm_delete"] = None
 for _, r in df.iterrows():
 
     with st.container():
@@ -231,7 +232,28 @@ for _, r in df.iterrows():
         # =========================
         # BUTTON DETAIL (INLINE)
         # =========================
-        if colA.button("📄 Detail", key=f"detail_{r['id']}"):
+       if colB.button("🗑 Hapus", key=f"del_{r['id']}"):
+    st.session_state["confirm_delete"] = r["id"]
+
+if st.session_state["confirm_delete"] == r["id"]:
+
+    st.warning(f"⚠️ Yakin ingin menghapus pasien: {r['nama_pasien']} ?")
+
+    col_yes, col_no = st.columns(2)
+
+    with col_yes:
+        if st.button("✅ Ya, Hapus", key=f"yes_{r['id']}"):
+
+            c.execute("DELETE FROM operan WHERE id=?", (r["id"],))
+            conn.commit()
+
+            st.session_state["confirm_delete"] = None
+            st.rerun()
+
+    with col_no:
+        if st.button("❌ Batal", key=f"no_{r['id']}"):
+            st.session_state["confirm_delete"] = None
+            st.rerun()
 
             # toggle buka/tutup
             if st.session_state["open_detail"] == r["id"]:
@@ -242,11 +264,7 @@ for _, r in df.iterrows():
         # =========================
         # BUTTON DELETE
         # =========================
-        if colB.button("🗑 Hapus", key=f"del_{r['id']}"):
-
-            c.execute("DELETE FROM operan WHERE id=?", (r["id"],))
-            conn.commit()
-            st.rerun()
+       
 
         # =========================
         # DETAIL MUNCUL DI BAWAH ITEM YANG DIPILIH
@@ -265,9 +283,8 @@ if "detail" in st.session_state:
 
     st.divider()
 
-    st.subheader(f"📄 Detail Operan - {data['nama']}")
-
-    st.caption(f"RM: {data['rm']} | {data['tanggal']}")
+    st.subheader(f"📄 Detail Operan - {data['nama_pasien']}")
+st.caption(f"RM: {data['no_rm']} | {data['tanggal']}")
 
     st.info(data["operan"])
 
