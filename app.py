@@ -254,21 +254,28 @@ def render_timeline_operan(dataframe, context_key="main"):
                 st.caption("🔒 *Catatan ini telah dikunci (Sudah melewati batas waktu toleransi edit 2 hari).*")
 
 # =========================
-# 🔎 SEARCH OPTIMIZATION
-# =========================
-st.subheader("🔎 Cari Riwayat & Edit Pasien")
-search = st.text_input("Masukkan No RM / Nama Pasien", placeholder="Cari data untuk melihat riwayat atau mengedit data (Maksimal 6 bulan)...")
+# ========================================================
+# 🔎 SEARCH OPTIMIZATION & TAMBAH OPERAN INSTAN (FITUR BARU)
+# ========================================================
+st.subheader("🔎 Cari Pasien / Kamar & Tambah Operan Cepat")
+st.markdown("<p style='font-size:14px; color:#555;'>Ketik No RM, Nama Pasien, atau Nomor Kamar untuk melihat riwayat atau <b>menambah operan shift baru tanpa perlu mengetik ulang identitas pasien!</b></p>", unsafe_allow_html=True)
 
-if len(search.strip()) >= 3:
+search = st.text_input(
+    "Masukkan No RM / Nama Pasien / Nomor Kamar", 
+    placeholder="Contoh: 123456, Ahmad, atau Kamar 302..."
+)
+
+if len(search.strip()) >= 2:
+    # Query dioptimalkan agar bisa mencari berdasarkan No RM, Nama, atau Kamar
     df_search = pd.read_sql_query("""
         SELECT * FROM operan
-        WHERE no_rm LIKE ? OR nama_pasien LIKE ?
-        ORDER BY tanggal DESC LIMIT 50
-    """, conn, params=(f"%{search}%", f"%{search}%"))
+        WHERE no_rm LIKE ? OR nama_pasien LIKE ? OR kamar LIKE ?
+        ORDER BY tanggal DESC LIMIT 60
+    """, conn, params=(f"%{search}%", f"%{search}%", f"%{search}%"))
     
     if not df_search.empty:
-        st.success(f"Ditemukan {len(df_search)} riwayat operan pasien. Data di bawah 2 hari masih dapat diedit.")
         search_pasien_unik = df_search['no_rm'].unique()
+        st.success(f"📌 Ditemukan {len(search_pasien_unik)} pasien yang cocok dengan kata kunci '{search}'.")
         
         for rm in search_pasien_unik:
             df_s_pasien = df_search[df_search['no_rm'] == rm]
@@ -276,6 +283,7 @@ if len(search.strip()) >= 3:
             val_penjamin = info_terbaru['penjamin'] if pd.notna(info_terbaru['penjamin']) else "Umum"
             badge_penjamin = "🟢 BPJS" if val_penjamin == "BPJS" else "🔵 " + str(val_penjamin)
             
+            # Container Box untuk satu pasien
             with st.container(border=True):
                 col_s1, col_s2, col_s3, col_s4 = st.columns([1.2, 2, 1.2, 1])
                 col_s1.markdown(f"🏥 **No RM:** {info_terbaru['no_rm']}")
@@ -283,9 +291,42 @@ if len(search.strip()) >= 3:
                 col_s3.markdown(f"💳 **Penjamin:** {badge_penjamin}")
                 col_s4.markdown(f"🏠 **Kamar:** {info_terbaru['kamar']}")
                 
-                render_timeline_operan(df_s_pasien, context_key="search")
+                # --- FITUR UTAMA: FORM INSTAN TAMBAH OPERAN ---
+                with st.expander(f"➕ **Tambah Catatan Shift Baru untuk {info_terbaru['nama_pasien']}**", expanded=False):
+                    # Gunakan form dengan key unik berbasis No RM agar tidak bentrok
+                    with st.form(key=f"quick_form_{info_terbaru['no_rm']}", clear_on_submit=True):
+                        st.markdown(f"**Unit Aktif:** {selected_unit} | **Shift Saat Ini:** {auto_shift}")
+                        
+                        col_f1, col_f2 = st.columns(2)
+                        with col_f1:
+                            # Kamar & Diagnosa bisa di-update jika ada perubahan dari shift sebelumnya
+                            q_kamar = st.text_input("Konfirmasi/Ubah Kamar", value=info_terbaru['kamar'], key=f"q_kmr_{info_terbaru['no_rm']}")
+                            q_pj = st.text_input("PJ Penyerah Operan", key=f"q_pj_{info_terbaru['no_rm']}")
+                        with col_f2:
+                            q_diagnosa = st.text_input("Diagnosa Medis / Konsul Spesialis", value=info_terbaru['diagnosa'], key=f"q_dg_{info_terbaru['no_rm']}")
+                        
+                        q_operan = st.text_area("Isi Instruksi / Catatan Operan Baru", height=100, key=f"q_op_{info_terbaru['no_rm']}", placeholder="Tulis instruksi kelanjutan di sini...")
+                        
+                        submit_quick = st.form_submit_button("Simpan Operan Baru")
+                        
+                        if submit_quick:
+                            if not (q_operan.strip() and q_pj.strip() and q_kamar.strip() and q_diagnosa.strip()):
+                                st.error("❌ Gagal menyimpan! Catatan Operan, PJ, Kamar, dan Diagnosa wajib diisi.")
+                            else:
+                                waktu_quick = datetime.now(jakarta).strftime("%Y-%m-%d %H:%M:%S")
+                                c.execute("""
+                                    INSERT INTO operan (tanggal, unit, shift, no_rm, nama_pasien, kamar, diagnosa, operan, pj_operan, penjamin)
+                                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                                """, (waktu_quick, selected_unit, auto_shift, info_terbaru['no_rm'], info_terbaru['nama_pasien'], q_kamar.strip(), q_diagnosa.strip(), q_operan.strip(), q_pj.strip(), val_penjamin))
+                                conn.commit()
+                                st.toast(f"✅ Operan baru untuk {info_terbaru['nama_pasien']} berhasil disimpan!", icon="🟢")
+                                st.rerun()
+                
+                # Menampilkan riwayat operan pasien tersebut di bawahnya
+                st.markdown("<p style='margin-top:10px; margin-bottom:5px; color:#555; font-size:12px;'><b>📜 Riwayat Operan Sebelumnya:</b></p>", unsafe_allow_html=True)
+                render_timeline_operan(df_s_pasien, context_key=f"src_{info_terbaru['no_rm']}")
     else:
-        st.info("Tidak ditemukan riwayat kunjungan pasien dengan kata kunci tersebut.")
+        st.info("Tidak ditemukan data pasien atau kamar dengan kata kunci tersebut.")
 
 st.divider()
 
