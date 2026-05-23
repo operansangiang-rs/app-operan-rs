@@ -205,54 +205,56 @@ def edit_dialog(row_data):
         else:
             st.error("Semua kolom harus diisi!")
 
-# =========================
-# FUNGSI KELOLA DATA & PROTEKSI 2 HARI
-# =========================
+
+# ========================================================
+# FUNGSI KELOLA DATA & PROTEKSI 2 HARI (VERSI LIPAT)
+# ========================================================
 def render_timeline_operan(dataframe, context_key="main"):
-    """Fungsi bersama untuk menggambar timeline operan dengan batasan waktu edit max 2 hari"""
+    """Fungsi bersama untuk menggambar timeline operan dengan riwayat yang bisa dilipat"""
     waktu_sekarang = datetime.now(jakarta)
     
-    for _, r in dataframe.iterrows():
-        avatar_style = "user" if r['shift'] == "Pagi" else "assistant"
-        with st.chat_message(avatar_style):
-            st.markdown(f"⏱ **Shift {r['shift']}** | 📅 {r['tanggal']} | 👨‍⚕️ PJ: *{r['pj_operan']}*")
-            st.markdown(f"**Unit:** {r['unit']} | 🩺 **Diagnosa/Konsul:** {r['diagnosa']}")
-            st.info(f"💬 {r['operan']}")
-            
-            if r['edited_by']:
-                st.caption(f"✏️ Terakhir diubah oleh: {r['edited_by']} ({r['edited_at']})")
-            
-            # Cek Masa Kedaluwarsa Edit (Max 2 Hari / 48 Jam)
-            try:
-                tgl_input = datetime.strptime(r['tanggal'], "%Y-%m-%d %H:%M:%S")
-                tgl_input = jakarta.localize(tgl_input)
-                bisa_edit = (waktu_sekarang - tgl_input) <= timedelta(days=2)
-            except:
-                bisa_edit = False 
+    # Bungkus seluruh riwayat ke dalam expander agar bisa dilipat
+    with st.expander("📜 Lihat Detail Riwayat Operan Shift", expanded=False):
+        for _, r in dataframe.iterrows():
+            avatar_style = "user" if r['shift'] == "Pagi" else "assistant"
+            with st.chat_message(avatar_style):
+                st.markdown(f"⏱ **Shift {r['shift']}** | 📅 {r['tanggal']} | 👨‍⚕️ PJ: *{r['pj_operan']}*")
+                st.markdown(f"**Unit:** {r['unit']} | 🩺 **Diagnosa/Konsul:** {r['diagnosa']}")
+                st.info(f"💬 {r['operan']}")
                 
-            if bisa_edit:
-                cA, cB = st.columns([1, 8])
-                with cA:
-                    if st.button("✏️ Edit", key=f"btn_edit_{context_key}_{r['id']}"):
-                        edit_dialog(r)
-                with cB:
-                    if st.button("🗑 Hapus", key=f"btn_del_{context_key}_{r['id']}"):
-                        st.session_state[f"confirm_del_{context_key}_{r['id']}"] = True
-                        
-                if st.session_state.get(f"confirm_del_{context_key}_{r['id']}", False):
-                    st.error("Apakah Anda yakin ingin menghapus catatan instruksi spesifik ini?")
-                    cx, cy = st.columns([1, 10])
-                    if cx.button("Ya, Hapus", key=f"yes_del_{context_key}_{r['id']}"):
-                        c.execute("DELETE FROM operan WHERE id=?", (r['id'],))
-                        conn.commit()
-                        del st.session_state[f"confirm_del_{context_key}_{r['id']}"]
-                        st.rerun()
-                    if cy.button("Batal", key=f"no_del_{context_key}_{r['id']}"):
-                        del st.session_state[f"confirm_del_{context_key}_{r['id']}"]
-                        st.rerun()
-            else:
-                st.caption("🔒 *Catatan ini telah dikunci (Sudah melewati batas waktu toleransi edit 2 hari).*")
-
+                if r['edited_by']:
+                    st.caption(f"✏️ Terakhir diubah oleh: {r['edited_by']} ({r['edited_at']})")
+                
+                # Cek Masa Kedaluwarsa Edit (Max 2 Hari / 48 Jam)
+                try:
+                    tgl_input = datetime.strptime(r['tanggal'], "%Y-%m-%d %H:%M:%S")
+                    tgl_input = jakarta.localize(tgl_input)
+                    bisa_edit = (waktu_sekarang - tgl_input) <= timedelta(days=2)
+                except:
+                    bisa_edit = False 
+                    
+                if bisa_edit:
+                    cA, cB = st.columns([1, 8])
+                    with cA:
+                        if st.button("✏️ Edit", key=f"btn_edit_{context_key}_{r['id']}"):
+                            edit_dialog(r)
+                    with cB:
+                        if st.button("🗑 Hapus", key=f"btn_del_{context_key}_{r['id']}"):
+                            st.session_state[f"confirm_del_{context_key}_{r['id']}"] = True
+                            
+                    if st.session_state.get(f"confirm_del_{context_key}_{r['id']}", False):
+                        st.error("Apakah Anda yakin ingin menghapus catatan instruksi spesifik ini?")
+                        cx, cy = st.columns([1, 10])
+                        if cx.button("Ya, Hapus", key=f"yes_del_{context_key}_{r['id']}"):
+                            c.execute("DELETE FROM operan WHERE id=?", (r['id'],))
+                            conn.commit()
+                            del st.session_state[f"confirm_del_{context_key}_{r['id']}"]
+                            st.rerun()
+                        if cy.button("Batal", key=f"no_del_{context_key}_{r['id']}"):
+                            del st.session_state[f"confirm_del_{context_key}_{r['id']}"]
+                            st.rerun()
+                else:
+                    st.caption("🔒 *Catatan ini telah dikunci (Sudah melewati batas waktu toleransi edit 2 hari).*")
 # =========================
 # ========================================================
 # 🔎 SEARCH OPTIMIZATION & TAMBAH OPERAN INSTAN (FITUR BARU)
