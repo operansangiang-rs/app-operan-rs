@@ -4,6 +4,7 @@ import pandas as pd
 from io import BytesIO
 from datetime import datetime, timedelta
 import pytz
+import time  # Ditambahkan untuk jeda notifikasi sukses
 
 from reportlab.platypus import (
     SimpleDocTemplate,
@@ -137,7 +138,6 @@ try:
     columns_info = c.fetchall()
     
     if backup_rows:
-        # Pake file temp lokal sementara di server, bukan BytesIO langsung ke sqlite3
         temp_filename = "temp_backup.db"
         
         mem_conn = sqlite3.connect(temp_filename)
@@ -146,7 +146,6 @@ try:
         create_table_sql = "CREATE TABLE IF NOT EXISTS operan (" + ", ".join([f"{col[1]} {col[2]}" for col in columns_info]) + ")"
         mem_c.execute(create_table_sql)
         
-        # Bersihkan data lama di file temp jika ada sisa proses sebelumnya
         mem_c.execute("DELETE FROM operan")
         
         placeholders = ", ".join(["?"] * len(columns_info))
@@ -154,7 +153,6 @@ try:
         mem_conn.commit()
         mem_conn.close()
         
-        # Baca file temp tadi ke dalam bentuk bytes agar bisa didownload
         with open(temp_filename, "rb") as f:
             db_bytes = f.read()
             
@@ -205,7 +203,6 @@ def edit_dialog(row_data):
         else:
             st.error("Semua kolom harus diisi!")
 
-
 # ========================================================
 # FUNGSI KELOLA DATA & PROTEKSI 2 HARI (VERSI LIPAT)
 # ========================================================
@@ -213,8 +210,8 @@ def render_timeline_operan(dataframe, context_key="main"):
     """Fungsi bersama untuk menggambar timeline operan dengan riwayat yang bisa dilipat"""
     waktu_sekarang = datetime.now(jakarta)
     
-    # Bungkus seluruh riwayat ke dalam expander agar bisa dilipat
-    with st.expander("📜 Lihat Detail Riwayat Operan Shift", expanded=False):
+    # Memakai expander supaya riwayatnya bisa dilipat-buka
+    with st.expander("📜 Lihat Detail Riwayat Operan Shift Pasien Ini", expanded=False):
         for _, r in dataframe.iterrows():
             avatar_style = "user" if r['shift'] == "Pagi" else "assistant"
             with st.chat_message(avatar_style):
@@ -255,7 +252,7 @@ def render_timeline_operan(dataframe, context_key="main"):
                             st.rerun()
                 else:
                     st.caption("🔒 *Catatan ini telah dikunci (Sudah melewati batas waktu toleransi edit 2 hari).*")
-# =========================
+
 # ========================================================
 # 🔎 SEARCH OPTIMIZATION & TAMBAH OPERAN INSTAN (FITUR BARU)
 # ========================================================
@@ -268,7 +265,7 @@ search = st.text_input(
 )
 
 if len(search.strip()) >= 2:
-    # Query dioptimalkan agar bisa mencari berdasarkan No RM, Nama, atau Kamar
+    # Query untuk mencari berdasarkan No RM, Nama, atau Kamar
     df_search = pd.read_sql_query("""
         SELECT * FROM operan
         WHERE no_rm LIKE ? OR nama_pasien LIKE ? OR kamar LIKE ?
@@ -285,7 +282,7 @@ if len(search.strip()) >= 2:
             val_penjamin = info_terbaru['penjamin'] if pd.notna(info_terbaru['penjamin']) else "Umum"
             badge_penjamin = "🟢 BPJS" if val_penjamin == "BPJS" else "🔵 " + str(val_penjamin)
             
-            # Container Box untuk satu pasien
+            # Box per pasien
             with st.container(border=True):
                 col_s1, col_s2, col_s3, col_s4 = st.columns([1.2, 2, 1.2, 1])
                 col_s1.markdown(f"🏥 **No RM:** {info_terbaru['no_rm']}")
@@ -293,15 +290,13 @@ if len(search.strip()) >= 2:
                 col_s3.markdown(f"💳 **Penjamin:** {badge_penjamin}")
                 col_s4.markdown(f"🏠 **Kamar:** {info_terbaru['kamar']}")
                 
-                # --- FITUR UTAMA: FORM INSTAN TAMBAH OPERAN ---
+                # FORM INSTAN UNTUK MEMASUKKAN OPERAN BARU
                 with st.expander(f"➕ **Tambah Catatan Shift Baru untuk {info_terbaru['nama_pasien']}**", expanded=False):
-                    # Gunakan form dengan key unik berbasis No RM agar tidak bentrok
                     with st.form(key=f"quick_form_{info_terbaru['no_rm']}", clear_on_submit=True):
                         st.markdown(f"**Unit Aktif:** {selected_unit} | **Shift Saat Ini:** {auto_shift}")
                         
                         col_f1, col_f2 = st.columns(2)
                         with col_f1:
-                            # Kamar & Diagnosa bisa di-update jika ada perubahan dari shift sebelumnya
                             q_kamar = st.text_input("Konfirmasi/Ubah Kamar", value=info_terbaru['kamar'], key=f"q_kmr_{info_terbaru['no_rm']}")
                             q_pj = st.text_input("PJ Penyerah Operan", key=f"q_pj_{info_terbaru['no_rm']}")
                         with col_f2:
@@ -321,11 +316,15 @@ if len(search.strip()) >= 2:
                                     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                                 """, (waktu_quick, selected_unit, auto_shift, info_terbaru['no_rm'], info_terbaru['nama_pasien'], q_kamar.strip(), q_diagnosa.strip(), q_operan.strip(), q_pj.strip(), val_penjamin))
                                 conn.commit()
-                                st.toast(f"✅ Operan baru untuk {info_terbaru['nama_pasien']} berhasil disimpan!", icon="🟢")
+                                
+                                # Tampilkan notifikasi sukses yang mantap
+                                st.success(f"🎉 Berhasil! Operan baru untuk {info_terbaru['nama_pasien']} telah tersimpan ke database.")
+                                st.toast(f"✅ Operan {info_terbaru['nama_pasien']} disimpan!", icon="🟢")
+                                
+                                time.sleep(1.2)  # Jeda biar perawat sempat baca
                                 st.rerun()
                 
-                # Menampilkan riwayat operan pasien tersebut di bawahnya
-                st.markdown("<p style='margin-top:10px; margin-bottom:5px; color:#555; font-size:12px;'><b>📜 Riwayat Operan Sebelumnya:</b></p>", unsafe_allow_html=True)
+                # Riwayat operan lama yang sudah bisa dilipat
                 render_timeline_operan(df_s_pasien, context_key=f"src_{info_terbaru['no_rm']}")
     else:
         st.info("Tidak ditemukan data pasien atau kamar dengan kata kunci tersebut.")
@@ -333,9 +332,9 @@ if len(search.strip()) >= 2:
 st.divider()
 
 # =========================
-# INPUT FORM
+# INPUT FORM (Untuk Pasien Baru)
 # =========================
-st.subheader(f"📝 Input Operan - {selected_unit}")
+st.subheader(f"📝 Input Operan Pasien Baru - {selected_unit}")
 with st.form("form_input", clear_on_submit=True):
     col1, col2 = st.columns(2)
     
@@ -364,11 +363,16 @@ if submit:
             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         """, (waktu_input, selected_unit, auto_shift, no_rm.strip(), nama_pasien.strip(), kamar.strip(), diagnosa.strip(), operan.strip(), pj_operan.strip(), penjamin))
         conn.commit()
+        
+        # Notifikasi Sukses Form Manual
+        st.success(f"🎉 Pasien Baru Berhasil Ditambahkan! Data operan {nama_pasien.strip()} telah disimpan.")
         st.toast("✅ Data operan berhasil disimpan!", icon="🟢")
+        
+        time.sleep(1.2)
         st.rerun()
 
 # =========================
-# DATA LIST
+# DATA LIST (2 Hari Terakhir)
 # =========================
 st.subheader(f"📋 Data Operan Aktif (2 Hari Terakhir) - {selected_unit}")
 df = pd.read_sql_query("""
@@ -396,8 +400,7 @@ else:
             col_p3.markdown(f"💳 **Penjamin:** {badge_penjamin}")
             col_p4.markdown(f"🏠 **Kamar:** {info_terbaru['kamar']}")
             
-            st.markdown("<p style='margin:2px 0px; color:#777; font-size:13px;'><b>🩺 Timeline Instruksi Medis & Operan Shift (Maksimal 3 Shift Terbaru):</b></p>", unsafe_allow_html=True)
-            
+            # Memanggil fungsi timeline versi lipat (hanya ambil maks 3 data teratas)
             render_timeline_operan(df_pasien.head(3), context_key="main")
 
 # =========================
